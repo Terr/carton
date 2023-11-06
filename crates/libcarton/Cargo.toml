@@ -1,0 +1,15 @@
+[package]
+name = "libcarton"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.65"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1.0"
+cgroups-rs = "0.3"
+env_logger = "0.10"
+libc = "0.2"
+log = "0.4"
+nix = { version = "0.27", features = ["sched", "signal", "hostname", "process", "mount", "fs"] }
+rand = "0.8"
