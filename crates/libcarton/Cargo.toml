@@ -2,7 +2,7 @@
 name = "libcarton"
 version = "0.1.0"
 description = "A very simple, lightweight container runtime"
-author = ["Arjen Verstoep"]
+authors = ["Arjen Verstoep"]
 edition = "2021"
 rust-version = "1.65"
 license = "Apache-2.0"
