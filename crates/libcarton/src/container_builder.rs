@@ -44,8 +44,8 @@ impl ContainerBuilder {
 
     pub fn add_mount(mut self, source: PathBuf, destination: PathBuf) -> Self {
         self.config.mounts.push(MountSpecification {
-            source: source.into(),
-            destination: destination.into(),
+            source,
+            destination,
         });
         self
     }
@@ -113,7 +113,7 @@ impl ContainerBuilder {
         self.stack_size
             .or_else(|| {
                 resource::getrlimit(resource::Resource::RLIMIT_STACK)
-                    .map(|(soft_limit, _)| soft_limit as u64)
+                    .map(|(soft_limit, _)| soft_limit)
                     .ok()
             })
             .map(|size| {
