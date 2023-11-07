@@ -23,17 +23,17 @@ impl ContainerBuilder {
     }
 
     pub fn rootfs(mut self, path: PathBuf) -> Self {
-        self.config.rootfs = MountSpecification {
+        self.config.rootfs = Some(MountSpecification {
             source: path,
             destination: "/".into(),
-        };
+        });
 
         self
     }
 
     pub fn command(mut self, command: PathBuf, args: Option<Vec<String>>) -> Self {
-        self.config.command = command;
-        self.config.arguments = args.unwrap_or_else(|| Vec::new());
+        self.config.command = Some(command);
+        self.config.arguments = args.unwrap_or_default();
         self
     }
 

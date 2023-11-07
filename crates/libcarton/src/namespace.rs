@@ -13,16 +13,29 @@ use crate::error::CartonError;
 /// Does the entire dance of setting up all the elements of the new processes' namespace, like
 /// creating devices nodes and actually mounting the root partition.
 pub(crate) fn setup_namespaces(config: &ContainerConfiguration) -> Result<(), CartonError> {
-    prepare_rootfs(&config.rootfs)?;
+    if config.rootfs.is_some() {
+        setup_mount_namespace(config)?;
+    }
 
-    mount_procfs(&config.rootfs)?;
-    mount_tmp(&config.rootfs)?;
-    mount_additional_binds(&config.rootfs, &config.mounts)?;
+    Ok(())
+}
 
-    mount_dev(&config.rootfs)?;
-    create_device_nodes(&config.rootfs, &config.devices)?;
+fn setup_mount_namespace(config: &ContainerConfiguration) -> Result<(), CartonError> {
+    let rootfs = config
+        .rootfs
+        .as_ref()
+        .expect("rootfs should not be None at this point");
 
-    mount_rootfs(&config.rootfs)?;
+    prepare_rootfs(rootfs)?;
+
+    mount_procfs(rootfs)?;
+    mount_tmp(rootfs)?;
+    mount_additional_binds(rootfs, &config.mounts)?;
+
+    mount_dev(rootfs)?;
+    create_device_nodes(rootfs, &config.devices)?;
+
+    mount_rootfs(rootfs)?;
 
     Ok(())
 }

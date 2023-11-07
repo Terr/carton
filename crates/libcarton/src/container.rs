@@ -9,7 +9,7 @@ use log::{error, info, warn};
 use nix::sched::{self, CloneFlags};
 use nix::sys::signal::Signal::SIGCHLD;
 use nix::sys::wait;
-use nix::{unistd, NixPath};
+use nix::unistd;
 
 use crate::error::CartonError;
 use crate::namespace::setup_namespaces;
@@ -31,7 +31,7 @@ impl Container {
             return Err(CartonError::AlreadyRunning);
         }
 
-        self.validate_configuration()?;
+        self.config.validate()?;
 
         let pid = unsafe {
             // There are some issues with nix's clone() regarding ownership of the stack memory and
@@ -47,7 +47,13 @@ impl Container {
 
                     setup_namespaces(&self.config).expect("container namespaces setup");
                     unistd::chdir("/").unwrap();
-                    execute_command(&self.config.command, &self.config.arguments)
+                    execute_command(
+                        self.config
+                            .command
+                            .as_ref()
+                            .expect("command should not be None at this point"),
+                        &self.config.arguments,
+                    )
                 }),
                 &mut self.buffer.stack,
                 CloneFlags::CLONE_NEWUTS | CloneFlags::CLONE_NEWNS | CloneFlags::CLONE_NEWPID,
@@ -75,39 +81,42 @@ impl Container {
         self.pid = None;
         self.state = ContainerState::Exited;
     }
-
-    fn validate_configuration(&self) -> Result<(), CartonError> {
-        if self.config.rootfs.source.is_empty() {
-            return Err(CartonError::MissingRequiredConfiguration("rootfs".into()));
-        }
-
-        if !self.config.rootfs.source.is_dir() {
-            return Err(CartonError::InvalidConfiguration(format!(
-                "rootfs does not exist or is not a directory: {:?}",
-                self.config.rootfs.source
-            )));
-        }
-
-        if self.config.command.is_empty() {
-            return Err(CartonError::MissingRequiredConfiguration("command".into()));
-        }
-
-        Ok(())
-    }
 }
 
 #[derive(Default, Debug)]
 pub(crate) struct ContainerConfiguration {
     /// The path to the root filesystem of the container.
-    pub(crate) rootfs: MountSpecification,
+    pub(crate) rootfs: Option<MountSpecification>,
     /// Command to execute inside the container.
-    pub(crate) command: PathBuf,
+    pub(crate) command: Option<PathBuf>,
     /// Arguments to the command
     pub(crate) arguments: Vec<String>,
     /// Additional paths on the "host" to bind mount inside the container.
     pub(crate) mounts: Vec<MountSpecification>,
     /// Device nodes to create in /dev.
     pub(crate) devices: Vec<DeviceNode>,
+}
+
+impl ContainerConfiguration {
+    pub(crate) fn validate(&self) -> Result<(), CartonError> {
+        match &self.rootfs {
+            None => return Err(CartonError::MissingRequiredConfiguration("rootfs".into())),
+            Some(root_spec) => {
+                if !root_spec.source.is_dir() {
+                    return Err(CartonError::InvalidConfiguration(format!(
+                        "rootfs does not exist or is not a directory: {:?}",
+                        root_spec.source
+                    )));
+                }
+            }
+        };
+
+        if self.command.is_none() {
+            return Err(CartonError::MissingRequiredConfiguration("command".into()));
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Default, Debug)]
