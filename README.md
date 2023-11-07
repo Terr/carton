@@ -11,7 +11,7 @@ If you found this repository because you're curious about containers too then I 
 ## How to run a container
 
 1. You need a "root filesystem" for your container. Because this runtime doesn't work with Docker images you need to have a directory somewhere with, for example, the contents of an [Alpine mini root filesystem][4]
-2. Download and compile this project using Cargo (or download a release once I have that set up)
+2. [Download a release][5] or compile this project using Cargo
 3. As a root user or with sudo, run something like `carton /path/to/alpine_minirootfs /bin/sh`
 4. Enjoy your namespaced process!
 
@@ -33,3 +33,4 @@ For any container runtime development I highly recommend to do testing and debug
 [2]: https://github.com/opencontainers/runtime-spec/blob/main/spec.md
 [3]: https://man7.org/linux/man-pages/man7/namespaces.7.html
 [4]: https://alpinelinux.org/downloads/
+[5]: https://github.com/Terr/carton/releases
