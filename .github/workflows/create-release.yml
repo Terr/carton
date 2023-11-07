@@ -1,0 +1,120 @@
+name: create-release
+run-name: Creating release for tag ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - v**
+
+env:
+  PROJECT_NAME: "carton"
+
+jobs:
+  build-release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+        - build: linux-gnu
+          os: ubuntu-22.04
+          rust: stable
+          target: x86_64-unknown-linux-gnu
+          binary_extension:
+
+        - build: linux-musl
+          os: ubuntu-22.04
+          rust: stable
+          target: x86_64-unknown-linux-musl
+          binary_extension:
+
+        # Carton needs a fix to compile on 32-bit systems.
+        # - build: linux-arm
+        #   os: ubuntu-22.04
+        #   rust: stable
+        #   target: arm-unknown-linux-gnueabihf
+        #   binary_extension:
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install prerequisites
+        shell: bash
+        run: |
+          case "${{ matrix.target }}" in
+            arm-unknown-linux-*) sudo apt-get -y update ; sudo apt-get -y install gcc-arm-linux-gnueabihf ;;
+            aarch64-unknown-linux-gnu) sudo apt-get -y update ; sudo apt-get -y install gcc-aarch64-linux-gnu ;;
+          esac
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}-${{ matrix.target }}-${{ matrix.rust }}
+
+      - name: Set cargo command
+        shell: bash
+        run: echo "CARGO=cargo" >> $GITHUB_ENV
+
+      - name: Install Cross
+        if: "!startsWith(matrix.build, 'win')"
+        shell: bash
+        run: |
+          cargo install --bins cross
+          echo "CARGO=cross" >> $GITHUB_ENV
+
+      - name: Set environment variables related to compilation
+        shell: bash
+        run: |
+          echo "TARGET_FLAGS=--target ${{ matrix.target }}" >> $GITHUB_ENV
+          echo "TARGET_DIR=./target/${{ matrix.target }}/release" >> $GITHUB_ENV
+
+      - name: Build release binary for ${{ matrix.target }}
+        shell: bash
+        run: ${{ env.CARGO }} build --release --verbose $TARGET_FLAGS
+
+      - name: List files
+        shell: bash
+        run: find . -type f
+
+      - name: Set binary paths
+        shell: bash
+        run: |
+          echo "BINARY_SRC_PATH=${{ env.TARGET_DIR }}/${{ env.PROJECT_NAME }}${{ matrix.binary_extension }}" >> $GITHUB_ENV
+          echo "BINARY_DEST_PATH=${{ env.TARGET_DIR }}/${{ env.PROJECT_NAME }}-${{ matrix.target }}${{ matrix.binary_extension }}" >> $GITHUB_ENV
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          mv "${{ env.BINARY_SRC_PATH }}" "${{ env.BINARY_DEST_PATH }}"
+
+      - name: Strip release binary
+        shell: bash
+        run: |
+          STRIP="strip"
+          case ${{ matrix.target }} in
+            arm-unknown-linux-*) STRIP="arm-linux-gnueabihf-strip" ;;
+            aarch64-unknown-linux-gnu) STRIP="aarch64-linux-gnu-strip" ;;
+            *-pc-windows-*) STRIP="" ;;
+          esac;
+
+          if [ -n "${STRIP}" ]; then
+            "${STRIP}" "${{ env.BINARY_DEST_PATH }}"
+          fi
+
+      - name: List files
+        shell: bash
+        run: find . -type f
+
+      - name: Upload release binary
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            ${{ env.BINARY_DEST_PATH }}
