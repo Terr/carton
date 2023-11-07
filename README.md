@@ -6,11 +6,11 @@ This is a learning project for myself to learn about the inner workings of Linux
 
 It turns out that it only takes a few Linux syscalls to turn a process into a very minimal "container", which actually just means a process is placed into separate [namespaces][3]. Most of the system calls have to do with setting up mounts so that your process will have its own root filesystem.
 
-If you found this repository because you curious too then I hope this code and the comments will help you.
+If you found this repository because you're curious about containers too then I hope this code and the comments will help you.
 
 ## How to run a container
 
-1. You need a "root filesystem" for your container. Since this runtime doesn't work with Docker images you need to have a directory somewhere with, for example, the contents of an [Alpine mini root filesystem][4]
+1. You need a "root filesystem" for your container. Because this runtime doesn't work with Docker images you need to have a directory somewhere with, for example, the contents of an [Alpine mini root filesystem][4]
 2. Download and compile this project using Cargo (or download a release once I have that set up)
 3. As a root user or with sudo, run something like `carton /path/to/alpine_minirootfs /bin/sh`
 4. Enjoy your namespaced process!
