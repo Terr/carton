@@ -1,13 +1,13 @@
 // Copyright 2023 Arjen Verstoep
 // SPDX-License-Identifier: Apache-2.0
 
-use log::info;
+use std::path::Path;
 
 use nix::mount;
 use nix::sys::stat;
 use nix::unistd;
 
-use crate::container::{ContainerConfiguration, DeviceNode, MountSpecification};
+use crate::container::{ContainerConfiguration, DeviceNode, Mount};
 use crate::error::CartonError;
 
 /// Does the entire dance of setting up all the elements of the new processes' namespace, like
@@ -25,15 +25,18 @@ fn setup_mount_namespace(config: &ContainerConfiguration) -> Result<(), CartonEr
         .rootfs
         .as_ref()
         .expect("rootfs should not be None at this point");
+    let rootfs_source = rootfs
+        .source
+        .as_ref()
+        .expect("rootfs source path should not be None");
 
     prepare_rootfs(rootfs)?;
 
-    mount_procfs(rootfs)?;
-    mount_tmp(rootfs)?;
-    mount_additional_binds(rootfs, &config.mounts)?;
+    for mount in config.mounts.iter() {
+        mount.mount(rootfs_source)?;
+    }
 
-    mount_dev(rootfs)?;
-    create_device_nodes(rootfs, &config.devices)?;
+    create_device_nodes(&rootfs_source.join("dev"), &config.devices)?;
 
     mount_rootfs(rootfs)?;
 
@@ -45,7 +48,7 @@ fn setup_mount_namespace(config: &ContainerConfiguration) -> Result<(), CartonEr
 ///
 /// If we don't do this first, further mounts will either not pass into the mount namespace after
 /// pivot_root() or affect the "host" system, messing up things.
-fn prepare_rootfs(root_spec: &MountSpecification) -> Result<(), CartonError> {
+fn prepare_rootfs(rootfs: &Mount) -> Result<(), CartonError> {
     // Remount root within our mount namespace and mark it as private, so that any changes to it
     // (like a umount) will not (try) to affect the real root partition.
     mount::mount(
@@ -58,8 +61,8 @@ fn prepare_rootfs(root_spec: &MountSpecification) -> Result<(), CartonError> {
 
     // Prepare the new root filesystem for mounting
     mount::mount(
-        Some(&root_spec.source),
-        &root_spec.source,
+        rootfs.source.as_ref(),
+        rootfs.source.as_ref().unwrap(),
         None::<&str>,
         mount::MsFlags::MS_BIND | mount::MsFlags::MS_PRIVATE,
         None::<&str>,
@@ -68,78 +71,7 @@ fn prepare_rootfs(root_spec: &MountSpecification) -> Result<(), CartonError> {
     Ok(())
 }
 
-/// When the container runs in a separate PID namespace it also needs a separate /proc mount that
-/// will contain only this PID namespace's processes.
-fn mount_procfs(root_mount: &MountSpecification) -> Result<(), CartonError> {
-    let proc_mount = &root_mount.source.join("proc");
-    info!("mounting proc at {:?}", proc_mount);
-
-    mount::mount(
-        None::<&str>,
-        proc_mount,
-        Some("proc"),
-        mount::MsFlags::empty(),
-        None::<&str>,
-    )?;
-
-    Ok(())
-}
-
-/// Mounts /tmp under the new rootfs
-fn mount_tmp(root_mount: &MountSpecification) -> Result<(), CartonError> {
-    let tmp_mount = &root_mount.source.join("tmp");
-    info!("mounting tmp at {:?}", tmp_mount);
-
-    mount::mount(
-        None::<&str>,
-        tmp_mount,
-        Some("tmpfs"),
-        mount::MsFlags::empty(),
-        None::<&str>,
-    )?;
-
-    Ok(())
-}
-
-fn mount_additional_binds(
-    root_mount: &MountSpecification,
-    mounts: &[MountSpecification],
-) -> Result<(), CartonError> {
-    for mount_spec in mounts {
-        mount::mount(
-            Some(&mount_spec.source),
-            &root_mount.source.join(&mount_spec.destination),
-            None::<&str>,
-            mount::MsFlags::MS_BIND | mount::MsFlags::MS_PRIVATE,
-            None::<&str>,
-        )?;
-    }
-
-    Ok(())
-}
-
-/// Mounts a clean /dev under the new rootfs
-fn mount_dev(root_spec: &MountSpecification) -> Result<(), CartonError> {
-    let dev_path = root_spec.source.join("dev");
-    info!("mount /dev at {:?}", &dev_path);
-
-    mount::mount(
-        None::<&str>,
-        &dev_path,
-        Some("tmpfs"),
-        mount::MsFlags::empty(),
-        None::<&str>,
-    )?;
-
-    Ok(())
-}
-
-fn create_device_nodes(
-    root_spec: &MountSpecification,
-    devices: &[DeviceNode],
-) -> Result<(), CartonError> {
-    let dev_path = root_spec.source.join("dev");
-
+fn create_device_nodes(dev_path: &Path, devices: &[DeviceNode]) -> Result<(), CartonError> {
     let device_perm = stat::Mode::from_bits(0o0666).unwrap();
     for node in devices {
         stat::mknod(
@@ -162,7 +94,7 @@ fn create_device_nodes(
 /// Replacing the root mount inside the contaier consists of a few steps. This function marks all
 /// mount points with the right flags and then does the all-important `pivot_root()` that replaces
 /// the root mount inside the container with the new root filesystem.
-fn mount_rootfs(root_spec: &MountSpecification) -> Result<(), CartonError> {
+fn mount_rootfs(rootfs: &Mount) -> Result<(), CartonError> {
     // Pivot root to the new bind mount
     //
     // Instead of using a temporary "put_old" directory to mount the current root on, like
@@ -171,7 +103,10 @@ fn mount_rootfs(root_spec: &MountSpecification) -> Result<(), CartonError> {
     // This stacks the mounts with the "old root" at the top of the stack. By umounting that layer
     // we get to the new "fake" root like we want, without having to create/delete a temporary
     // directory.
-    unistd::pivot_root(&root_spec.source, &root_spec.source)?;
+    unistd::pivot_root(
+        rootfs.source.as_ref().unwrap(),
+        rootfs.source.as_ref().unwrap(),
+    )?;
 
     // Re-mount the root yet again but mark it as "MS_SLAVE" so umount events will
     // in no circumstance propagate to outside the namespace.

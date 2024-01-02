@@ -30,6 +30,7 @@ fn main() -> Result<()> {
     let mut container = ContainerBuilder::new()
         .rootfs(cli_args.rootfs_path)
         .command(cli_args.command, cli_args.arguments)
+        .add_default_mounts()
         .add_default_devices()
         .build()
         .context("building container")?;

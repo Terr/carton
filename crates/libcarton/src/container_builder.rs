@@ -6,9 +6,7 @@ use std::path::{Path, PathBuf};
 use nix::sys::resource;
 
 use crate::consts::DEFAULT_CONTAINER_STACK_SIZE;
-use crate::container::{
-    Container, ContainerBuffer, ContainerConfiguration, DeviceNode, MountSpecification,
-};
+use crate::container::{Container, ContainerBuffer, ContainerConfiguration, DeviceNode, Mount};
 use crate::error::CartonError;
 
 #[derive(Default, Debug)]
@@ -23,10 +21,7 @@ impl ContainerBuilder {
     }
 
     pub fn rootfs(mut self, path: PathBuf) -> Self {
-        self.config.rootfs = Some(MountSpecification {
-            source: path,
-            destination: "/".into(),
-        });
+        self.config.rootfs = Some(Mount::rootfs(path));
 
         self
     }
@@ -42,11 +37,21 @@ impl ContainerBuilder {
         self
     }
 
-    pub fn add_mount(mut self, source: PathBuf, destination: PathBuf) -> Self {
-        self.config.mounts.push(MountSpecification {
-            source,
-            destination,
-        });
+    /// Adds mounting configuration for some important mounts, in the correct order.
+    pub fn add_default_mounts(mut self) -> Self {
+        self.config.mounts.extend(vec![
+            Mount::procfs("proc".into()),
+            Mount::tmpfs("tmp".into()),
+            Mount::tmpfs("dev".into()),
+        ]);
+
+        self
+    }
+
+    pub fn add_mount(mut self, source: PathBuf, relative_target: PathBuf) -> Self {
+        self.config
+            .mounts
+            .push(Mount::bind(source, relative_target, None, None));
         self
     }
 

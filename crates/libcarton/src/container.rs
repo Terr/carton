@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use log::{error, info, warn};
 
+use nix::mount;
 use nix::sched::{self, CloneFlags};
 use nix::sys::signal::Signal::SIGCHLD;
 use nix::sys::wait;
@@ -86,13 +87,13 @@ impl Container {
 #[derive(Default, Debug)]
 pub(crate) struct ContainerConfiguration {
     /// The path to the root filesystem of the container.
-    pub(crate) rootfs: Option<MountSpecification>,
+    pub(crate) rootfs: Option<Mount>,
     /// Command to execute inside the container.
     pub(crate) command: Option<PathBuf>,
     /// Arguments to the command
     pub(crate) arguments: Vec<String>,
-    /// Additional paths on the "host" to bind mount inside the container.
-    pub(crate) mounts: Vec<MountSpecification>,
+    /// Vita paths (like /proc, /tmp, /dev) and paths from the "host" to bind mount inside the container.
+    pub(crate) mounts: Vec<Mount>,
     /// Device nodes to create in /dev.
     pub(crate) devices: Vec<DeviceNode>,
 }
@@ -102,7 +103,12 @@ impl ContainerConfiguration {
         match &self.rootfs {
             None => return Err(CartonError::MissingRequiredConfiguration("rootfs".into())),
             Some(root_spec) => {
-                if !root_spec.source.is_dir() {
+                if !root_spec
+                    .source
+                    .as_ref()
+                    .expect("rootfs source path should not be None")
+                    .is_dir()
+                {
                     return Err(CartonError::InvalidConfiguration(format!(
                         "rootfs does not exist or is not a directory: {:?}",
                         root_spec.source
@@ -134,10 +140,89 @@ pub enum ContainerState {
     Exited,
 }
 
-#[derive(Default, Debug)]
-pub(crate) struct MountSpecification {
-    pub source: PathBuf,
-    pub destination: PathBuf,
+#[derive(Debug)]
+pub struct Mount {
+    pub(crate) source: Option<PathBuf>,
+    relative_target: PathBuf,
+    fstype: Option<String>,
+    flags: mount::MsFlags,
+    data: Option<String>,
+}
+
+impl Mount {
+    /// Defines a "bind" mount which can be used to share a directory from outside the container
+    /// with the container.
+    pub(crate) fn bind(
+        source: PathBuf,
+        relative_target: PathBuf,
+        flags: Option<mount::MsFlags>,
+        data: Option<String>,
+    ) -> Self {
+        Mount {
+            source: Some(source),
+            relative_target,
+            fstype: None,
+            flags: flags.unwrap_or(mount::MsFlags::MS_BIND | mount::MsFlags::MS_PRIVATE),
+            data,
+        }
+    }
+
+    /// When the container runs in a separate PID namespace it also needs a separate /proc mount that
+    /// will contain only this PID namespace's processes.
+    pub(crate) fn procfs(relative_target: PathBuf) -> Self {
+        Mount {
+            source: None::<PathBuf>,
+            relative_target,
+            fstype: Some("proc".into()),
+            flags: mount::MsFlags::empty(),
+            data: None,
+        }
+    }
+
+    pub(crate) fn rootfs(source: PathBuf) -> Self {
+        Mount {
+            source: Some(source),
+            relative_target: "".into(),
+            fstype: None,
+            flags: mount::MsFlags::MS_BIND | mount::MsFlags::MS_PRIVATE,
+            data: None,
+        }
+    }
+
+    pub(crate) fn tmpfs(relative_target: PathBuf) -> Self {
+        Mount {
+            source: None::<PathBuf>,
+            relative_target,
+            fstype: Some("tmpfs".into()),
+            flags: mount::MsFlags::empty(),
+            data: None,
+        }
+    }
+
+    /// Returns the absolute path where the mount has been mounted
+    pub(crate) fn mount(&self, rootfs_path: &Path) -> Result<PathBuf, CartonError> {
+        let mount_path = rootfs_path.join(&self.relative_target);
+
+        info!(
+            "mount {} ({}) at {}",
+            &self
+                .source
+                .as_ref()
+                .map_or("(no source)", |p| p.to_str().unwrap()),
+            self.fstype.as_ref().map_or("bind mount", |f| f.as_str()),
+            &mount_path.display()
+        );
+
+        mount::mount(
+            self.source.as_ref(),
+            &mount_path,
+            self.fstype.as_deref(),
+            self.flags,
+            self.data.as_deref(),
+        )?;
+
+        Ok(mount_path)
+    }
 }
 
 #[derive(Debug)]
@@ -161,7 +246,7 @@ fn execute_command(command: &Path, arguments: &[String]) -> isize {
     c_args.insert(0, c_cmd.clone());
 
     // This syscall replaces the current process with the requested command. That means that this
-    // `run_command()` function will only return if went wrong with starting the command.
+    // `run_command()` function will only return if something went wrong with starting the command.
     // TODO execve()
     unistd::execv(&c_cmd, &c_args).and(Ok(0)).unwrap()
 }
