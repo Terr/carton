@@ -150,6 +150,16 @@ pub struct Mount {
 }
 
 impl Mount {
+    pub(crate) fn rootfs(source: PathBuf) -> Self {
+        Mount {
+            source: Some(source),
+            relative_target: "".into(),
+            fstype: None,
+            flags: mount::MsFlags::MS_BIND | mount::MsFlags::MS_PRIVATE,
+            data: None,
+        }
+    }
+
     /// Defines a "bind" mount which can be used to share a directory from outside the container
     /// with the container.
     pub(crate) fn bind(
@@ -169,22 +179,22 @@ impl Mount {
 
     /// When the container runs in a separate PID namespace it also needs a separate /proc mount that
     /// will contain only this PID namespace's processes.
-    pub(crate) fn procfs(relative_target: PathBuf) -> Self {
+    pub(crate) fn procfs() -> Self {
         Mount {
             source: None::<PathBuf>,
-            relative_target,
+            relative_target: "proc".into(),
             fstype: Some("proc".into()),
             flags: mount::MsFlags::empty(),
             data: None,
         }
     }
 
-    pub(crate) fn rootfs(source: PathBuf) -> Self {
+    pub(crate) fn sysfs() -> Self {
         Mount {
-            source: Some(source),
-            relative_target: "".into(),
-            fstype: None,
-            flags: mount::MsFlags::MS_BIND | mount::MsFlags::MS_PRIVATE,
+            source: None::<PathBuf>,
+            relative_target: "sys".into(),
+            fstype: Some("sysfs".into()),
+            flags: mount::MsFlags::empty(),
             data: None,
         }
     }
@@ -199,18 +209,33 @@ impl Mount {
         }
     }
 
+    pub(crate) fn devpts() -> Self {
+        Mount {
+            source: None::<PathBuf>,
+            relative_target: "dev/pts".into(),
+            fstype: Some("devpts".into()),
+            flags: mount::MsFlags::empty(),
+            data: None,
+        }
+    }
+
     /// Returns the absolute path where the mount has been mounted
     pub(crate) fn mount(&self, rootfs_path: &Path) -> Result<PathBuf, CartonError> {
         let mount_path = rootfs_path.join(&self.relative_target);
 
+        if !mount_path.exists() {
+            info!("creating {}", mount_path.display());
+            std::fs::create_dir_all(&mount_path)?;
+        }
+
         info!(
-            "mount {} ({}) at {}",
+            "mounting {} ({}) at {}",
             &self
                 .source
                 .as_ref()
                 .map_or("(no source)", |p| p.to_str().unwrap()),
             self.fstype.as_ref().map_or("bind mount", |f| f.as_str()),
-            &mount_path.display()
+            mount_path.display()
         );
 
         mount::mount(

@@ -40,9 +40,12 @@ impl ContainerBuilder {
     /// Adds mounting configuration for some important mounts, in the correct order.
     pub fn add_default_mounts(mut self) -> Self {
         self.config.mounts.extend(vec![
-            Mount::procfs("proc".into()),
+            Mount::procfs(),
+            Mount::sysfs(),
             Mount::tmpfs("tmp".into()),
             Mount::tmpfs("dev".into()),
+            Mount::devpts(),
+            Mount::tmpfs("dev/shm".into()),
         ]);
 
         self

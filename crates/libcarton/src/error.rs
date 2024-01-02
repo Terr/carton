@@ -16,6 +16,14 @@ pub enum CartonError {
     SysCallFailed(String),
     #[error("namespace error: {0}")]
     NamespaceError(String),
+    #[error("I/O error: {0}")]
+    IOError(String),
+}
+
+impl From<std::io::Error> for CartonError {
+    fn from(error: std::io::Error) -> Self {
+        CartonError::IOError(format!("{}", error))
+    }
 }
 
 impl From<nix::Error> for CartonError {
